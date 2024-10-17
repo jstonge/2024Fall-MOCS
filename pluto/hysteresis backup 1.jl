@@ -14,652 +14,497 @@ macro bind(def, element)
     end
 end
 
-# ╔═╡ 1c1d9c09-28e8-4adf-8099-ea489ddc7f87
-using PlutoUI, DifferentialEquations, CairoMakie, Symbolics
-
-# ╔═╡ 3f35d529-931e-4895-82d1-01d611b49ed9
-using PlutoUI: Slider
-
-# ╔═╡ ff1e39f5-c648-481a-9194-7f9a4be71a88
-using LinearAlgebra
-
-# ╔═╡ 680f4d18-b855-4535-83a7-3b859a92f0f1
-md"# Lotka-Volterra (LK) models
-
- - Roughgarden (Ch. 6)
-"
-
-# ╔═╡ 45867cdf-9cff-4f37-9f8c-87eb6bf133b9
-md"## Lotka volterra prey predator
-
-$$\dot{F} = \mu F - \beta FS$$
-$$\dot{S} = c \beta FS - \nu S$$
-
-where $c$ is a conversion factor of how much fish to you need to get a shark.
-"
-
-# ╔═╡ 21d35ee9-9f6a-44be-bf6a-6459175a83ae
-let
-	
-	# parameters
-	α = 0.05 # predation rate (shark reproduction)
-	ν = 0.02 # Shark death rate
-	μ = 0.05 # Fish repro rate
-	c = 1/10  # conversion
-	
-	# ------------ Part 1 - Phase space -----------------------
-	
-	struct PreyPred{T}
-		α::T
-		ν::T
-	    μ::T
-		c::T
-	end
-	
-	h(x, P::PreyPred) = Point2f( # y,x
-	   	 	P.μ*x[1] - P.α*x[1]*x[2],
-			-P.ν*x[2] + P.c*P.α*x[1]*x[2]
-	)
-	
-	# Plotting
-	f = Figure(size=(700,350))
-	ax = Axis(f[1, 1], 
-	    xlabel = "Fish", 
-	    ylabel = "Shark", 
-	    title = "Phase space"
-	)
-	
-	kf, ks = 63, 10
-	streamplot!(ax, 
-		x -> h(x, PreyPred(α,ν,μ,c)), 
-		0..kf, 0..ks, 
-		colormap = :magma,
-		arrow_size = 8
-	)
-	
-	lines!(ax, 0.0:kf, fill(μ/α, kf+1), color=:red)
-	lines!(ax, fill(ν/(α*c), ks+1), 0.0:ks, color=:blue)
-
-	# ----------------- PART 2  - Timeseries -------------------
-	
-	h = 0.01 
-	Tmax = 1500.0  
-	T = 0:h:Tmax  # range(0, Tmax, h) in python
-	
-	# Initial conditions
-	F, S = 20.0, 0.01 
-	
-	Fd = [F]
-	Sd = [S]
-
-	# no super efficient
-	for t=2:length(T) 
-	    dF = μ*F - α * F*S
-	    dS = -ν*S + c*α*S*F
-	    
-	    F += dF * h 
-	    S += dS * h 
-	    
-	    push!(Fd, F)
-	    push!(Sd, S)
-	end
-	
-	ax = Axis(f[1, 2], title = "Time series", xlabel = "Time", ylabel = "Population")
-	
-	lines!(ax, T, Fd, color = :blue, label = "Fish")
-	lines!(ax, T, Sd, color = :red, label = "Shark")
-	axislegend(ax)
-	
-	
-	f
+# ╔═╡ e294cc06-8612-4b0d-a6a8-71fd2c9b9b0a
+begin
+	using PlutoUI: Slider
+	using Roots: find_zero, find_zeros
+ 	using DifferentialEquations
+	using BifurcationKit
+	using StaticArrays
+	using Plots : plot
+	using CairoMakie, Symbolics, LinearAlgebra
 end
 
-# ╔═╡ 31f94c86-ad6c-446f-84eb-a17c865d4463
-md"
-from [Sayama §7.4](https://math.libretexts.org/Bookshelves/Scientific_Computing_Simulations_and_Modeling/Introduction_to_the_Modeling_and_Analysis_of_Complex_Systems_(Sayama)/07%3A_ContinuousTime_Models_II__Analysis/7.04%3A_Asymptotic_Behavior_of_Continuous-Time_Linear_Dynamical_Systems)
->An eigenvalue tells us whether a particular component of a system’s state (given by its corresponding eigenvector) grows or shrinks over time. For continuous-time models:
-> - Re(λ) > 0 means that the component is growing.
-> - Re(λ) < 0 means that the component is shrinking.
-> - Re(λ) = 0 means that the component is conserved.
-> For continuous-time models, the real part of the dominant eigenvalue λd determines the stability of the whole system as follows:
-> - Re(λ𝑑)>0 : The system is _unstable_, diverging to infinity.
-> - Re(λ𝑑)<0 : The system is _stable_, converging to the origin.
-> - Re(λ𝑑)=0: The system is _stable_, but the dominant eigenvector component is conserved, and therefore the system may converge to a non-zero equilibrium point.
+# ╔═╡ 77f53eee-7f3e-11ef-1c4f-19f70a6defd8
+md"# Hysteresis
+
+ - see Garfinkel §6.3
+ - Sayama §?
+ - Strogatz §3.7
 "
 
-# ╔═╡ a4e84256-abd8-495c-8445-a75235b2669c
-let
-	@variables F S μ β γ ν
-	# The jacobian is 
-	# [ ∂Ẋ/∂X  ∂Ẋ/∂Y 
-	#   ∂Ẋ/∂Y  ∂Ẏ/∂Y
-	# We get that easily in Symbolics
-	J = Symbolics.jacobian(
-		[
-			μ*F - β*F*S, 
-			-ν*S + γ*β*F*S
-		], 
-		[F, S]
-	)
+# ╔═╡ e9df3bcd-0b22-4310-8091-9c2c06d74fb8
+md"## model 1: Lac Operon
 
-	
-	# we substitue in the Jacobian our nullclines
-	Je = substitute.(J, (Dict(S => (μ/β), F => ν/(γ*β)),))
+- Garfinkel p.159
 
-	println(Je)
-	
-	# we plug in our values
-	Je_eval = substitute.(Je, (Dict(
-			μ => 5, β => 1., ν => 10., γ => 1., 
-	),))
+Here is the plot of the Lac Opeyron model
 
-	println("trace: $(tr(Je_eval))") # = 0, means it is stable
+$$f(x) = \frac{a+X^2}{1+X^2} - rX$$
 
-	
-	# We can look at the eigenvalues at those values
-	round.(eigvals(Symbolics.value.(Je_eval)), digits=2)
-
-	
-end
-
-# ╔═╡ 1cfab4fa-2fb0-49a4-92f6-a1a7eb56e8d2
-md"Here the eigenvalues are purely imaginary, which implies neutral stability. The system oscillates in closed orbits around the equilibrium but does not spiral in or out. This means there is no damping or growth—consistent with the periodic solutions of the Lotka-Volterra system."
-
-# ╔═╡ 5e26b052-7529-4841-a55c-79943c102bd6
-md"## Lotka–Volterra competition model
-
-- Garfinkel §3.4 and §7.5 
+with $r=0.4$ and $a=0.01$
 "
 
-# ╔═╡ 897e030a-9efe-4ecd-8727-95bb4c5350ad
-let
-	
-	# parameters from Garfinkel
-	r1,k1,α1,r2,k2,α2 = 3., 2., 0.9, 3., 2.,0.9
-	
-	# SIR struct to hold parameters
-	struct LKc{T}
-	    r1::T
-		k1::T
-		α1::T
-		r2::T
-		k2::T
-		α2::T
-	end
-	
-	params = LKc(r1,k1,α1,r2,k2,α2)
-	
-	# SIR model's right-hand side
-	h(x, P::LKc) = Point2f( 
-	    x[1]*(P.r1 - P.k1*x[2] - P.α1*x[1]),
-	    x[2]*(P.r2 - P.k2*x[1] - P.α2*x[2])
-	)
-	
-	h(x) = h(x, params)
-	
-	# Plotting
-	f = Figure()
-	ax = Axis(f[1, 1], 
-	    xlabel = "X", 
-	    ylabel = "Y", 
-	    title = "Lotka Volterra"
-	)
-	
-	# Streamplot for vector field of the SIR model
-	streamplot!(ax, h, 0..5, 0..5, colormap = :magma)
+# ╔═╡ c44f28c6-34db-4e9a-834e-e1d99761996b
+md"The black dots are stable states, while the white dots are unstable. We can see that with these parameters, there is a point near $0.5$ where you get an unstable point, with values drawn either toward zero or 2. We can do the same for a slightly lower $r$ value ($r=0.19$). We extend the xaxis a little bit too"
 
-	f
-end
+# ╔═╡ 1a31c7bf-f6b3-4dfb-b800-56e7e53daf19
+md"We find that where $kX$ and $\frac{a+X^2}{1+X^2}$ cross, this is indicative of the presence and stability of our equilibrium points. We can do the same again for a higher value of $r$ ($r=0.55$)"
 
-# ╔═╡ a6097bcf-2a35-4d22-a622-ed264e5df5f4
+# ╔═╡ 852053ab-357f-4e15-97bf-7b27c01c8929
+md"We now get a single equilibrium point very close to zero, which correspond to a solution that is rapidly found by our solver as well. If we play the same game, then put all the state spaces on vertical lines for different values of $r$"
+
+# ╔═╡ 1d57537e-8ff8-45c8-b32d-439392a09f16
 let 
-	@variables D M r1 r2 k1 k2 α1 α2
-	J = Symbolics.jacobian(
-		[
-			D * (r1 - k1*M - α1*D) , 
-			M * (r2 - k2*D - α2*M) 
-		], 
-		[D, M]
-	)
-
-	# we plug in our values
-	Je = substitute.(J, (Dict(
-		r1 => 3, r2 => 2., k1 => 2, k2 => 1, α1 => 1., α2 => 1
-	),))
+	fig = Figure(size=(600,350))
+	ax = Axis(fig[1, 1], xlabel = "r (or conditions)", ylabel = "X (ecosystem state)") 
+	hidespines!(ax, :t, :r) # only top and right
+	# hideydecorations!(ax,  label = false)
 	
-	Je_eval = substitute.(Je, (Dict(D => 1.0, M => 1.0),))
-	
-
-	println("trace: $(tr(Je_eval))") # ≠ 0, means it is unstable. but How?
-
-	# J
-	# Je
-	
-	# From the matrix, we can that real parts = -1
-	# thus we have Re(λd) < 0
-	# Je_eval
-
-	# We can look at the eigenvalues 
-	round.(eigvals(Symbolics.value.(Je_eval)), digits=2)
-	
-	# then our domain eigenvalues is < negative
-end
-
-# ╔═╡ 966176bf-0d82-4829-b48e-3b9d78414f83
-md"## Lotka volterra generalized version
-
-Two species LK model of competition (Roughgarden §6.1):
-
-$$\frac{dN_1}{dt} = \frac{r_1 N_1(K_1 - N_1 - \alpha_{12} N_2)}{K1}$$
-$$\frac{dN_2}{dt} = \frac{r_2 N_2(K_2 - N_2 - \alpha_{21} N_1)}{K2}$$
-"
-
-# ╔═╡ 27210822-ca11-4715-87fe-a368faccc885
-md"
-> Increase-when-rare criterion: 
-> - Species 1: When $\dot{N1} > 0$ but N1 is nearly zero, and $N_2 = K_2$. We find that the term in parenthesis from our equation $\approx K_1 - \alpha_{12}K_2$ determine the outcome. Hence if $K1 - \alpha_{12}K_2 > 0$, or $\frac{K1}{\alpha_{12}} > K_2$, we get that species one can invade. If we write as $\alpha_{12} < \frac{K1}{K2}$, it makes clearer that competittion of sp1 onto sp2 must be high enough or that with large enough $K1$, sp1 can invade species 2 when rare. If $\alpha_{12} > \frac{K1}{K2}$, sp1 cannot invade.
-"
-
-# ╔═╡ 887c30fb-410d-4ee2-a111-b652b248dd27
-md"
-> Both species can invade:
->  - By the same logic, if we have $\alpha_{12} < \frac{K1}{K2}$ and $\alpha_{21} < \frac{K2}{K1}$ then both species can invade when rare. It means that the interspecific competition in both direction is weak enough to allow coexistence. Roughgarden mentions how this idea is tied to 'niches' in ecology, where it is best for biodiversity when species have varying strategies to avoid using each others' resources.
-"
-
-# ╔═╡ bc81df83-de41-421a-96af-bb6535f4e83f
-let 
-	@variables n₁ n₂ r1 r2 k1 k2 α1 α2
-	J = Symbolics.jacobian(
-		[
-			r1*n₁ * ((k1 - n₁ - α2*n₂) / k1), 
-			r2*n₂ * ((k2 - n₂ - α1*n₁) / k2)
-		], 
-		[n₁, n₂]
-	)
-
-	# we substitute our nullclines in the Jacobian
-	Je = substitute.(J, (Dict(
-		n₁ => (k1 - α2*k2) / (1 - α1*α2), 
-		n₂ => (k2 - α1*k1) / (1 - α1*α1),
-	),))
-	
-	Je_eval = substitute.(Je, (Dict(
-		r1 => 1, r2 => 1,
-		k1 => 1000, k2 => 1000,
-		α1 => .5, α2 => .5
-	),))
-
-	println("trace: $(tr(Je_eval))") # ≠ 0
-	
-	# We can look at the eigenvalues!
-	eigvals(Symbolics.value.(Je_eval))
-end
-
-# ╔═╡ 5165359e-bc77-454f-ba2e-4a8890b84751
-md"With both negative eigenvalues, we know the equilibrium is stable! The exact reason why is a bit beyond the scope of this class. See Sayama §7.4, Roughgarden §6.1.3, or Garfinkel §7.5 if you want to take a stab at it.
-"
-
-# ╔═╡ 9302f6f8-2270-4e4b-a58e-421643884ca9
-md"## More than 2 species
-
- - see [this clip from Lhd](https://mocs.observablehq.cloud/mocs-fall-2024/M1-Dynamics/W5-chaos)
- - Roughgarden §6.2
-
-$$\frac{dx_i}{dt} = x_i \sum_{j=1}^{n}A_{ij} (1 - x_j)$$
-
-where 
-
-$$A = \begin{pmatrix}
-A_{11} & A_{12} & A_{13} \\
-A_{21} & A_{22} & A_{23} \\
-A_{31} & A_{32} & A_{33}
-\end{pmatrix} = \begin{pmatrix}
-0.5 & 0.5 & 0.1 \\
--0.5 & -0.1 & 0.1 \\
-\alpha & 0.1 & 0.1
-\end{pmatrix}$$
-
-where the positive parameters mean predation, while negative parameters mean the opposite.
-"
-
-# ╔═╡ 06dc3062-9798-400d-be31-2c384298dc51
-# a = @bind a Slider(0.01:0.01:2, show_value=true, default=1.5)
-
-# ╔═╡ 64b0b639-06e0-41f6-b793-0b8e606493de
-# perturbation = @bind p Slider(0.01:0.01:0.5, default=0.09, show_value=true)
-
-# ╔═╡ 798b695d-45c0-4ced-96bd-b3b24b1bb176
-let
-
-	# Euler's method for the Lotka-Volterra model
-	
-	# Discrete steps of Euler's method
-	h = 0.001 # timestep
-	T = 1:h:100 # time range
-	
-	# Parameter of the model
-	a = 1.5 # you can vary this value
-	p = 0.09
-	A = [0.5 0.5 0.1; -0.5 -0.1 0.1; a 0.1 0.1] # interaction matrix
-	
-	# Euler's method for the 3-species Lotka-Volterra model
-	res = [] # store results
-	x1, x2, x3 = 0.5, 0.5, 0.5 # initial conditions
-	
-	for t in T
-	    delta_x1 = x1 * (A[1,1]*(1 - x1) + A[1,2]*(1 - x2) + A[1,3]*(1 - x3))
-	    delta_x2 = x2 * (A[2,1]*(1 - x1) + A[2,2]*(1 - x2) + A[2,3]*(1 - x3))
-	    delta_x3 = x3 * (A[3,1]*(1 - x1) + A[3,2]*(1 - x2) + A[3,3]*(1 - x3))
-	    x1 += delta_x1 * h
-	    x2 += delta_x2 * h
-	    x3 += delta_x3 * h
-	    push!(res, (x1, x2, x3))
-	end
-	
-	# Perform second simulation with slightly perturbed initial conditions
-	x1, x2, x3 = 0.5 + p, 0.5, 0.5 - 0.001 # perturbed initial conditions
-	res_2 = [] # store results for second run
-	
-	for t in T
-	    delta_x1 = x1 * (A[1,1]*(1 - x1) + A[1,2]*(1 - x2) + A[1,3]*(1 - x3))
-	    delta_x2 = x2 * (A[2,1]*(1 - x1) + A[2,2]*(1 - x2) + A[2,3]*(1 - x3))
-	    delta_x3 = x3 * (A[3,1]*(1 - x1) + A[3,2]*(1 - x2) + A[3,3]*(1 - x3))
-	    x1 += delta_x1 * h
-	    x2 += delta_x2 * h
-	    x3 += delta_x3 * h
-	    push!(res_2, (x1, x2, x3))
-	end
-	
-	# Unpack the results safely
-	X1t = [r[1] for r in res]
-	X2t = [r[2] for r in res]
-	X3t = [r[3] for r in res]
-	
-	X1t2 = [r[1] for r in res_2]
-	X2t2 = [r[2] for r in res_2]
-	X3t2 = [r[3] for r in res_2]
-	
-	# Plot the results using Makie
-	fig = Figure(size=(800, 600))
-	ax = Axis(fig[1, 1], title = "3-Species Lotka-Volterra Model", xlabel = "Time", ylabel = "Population")
-	
-	lines!(ax, h * T, abs.(X1t), color = :red, label = "x1")
-	lines!(ax, h * T, abs.(X2t), color = :green, label = "x2")
-	lines!(ax, h * T, abs.(X3t), color = :blue, label = "x3")
-	
-	# For the perturbed initial conditions
-	ax = Axis(fig[2,1], title = "3-Species Lotka-Volterra Model", xlabel = "Time", ylabel = "Population")
-	lines!(ax, h * T, abs.(X1t), color = :red, label = "x1")
-	lines!(ax, h * T, abs.(X1t2), color = :red, linestyle = :dash, label = "x1 perturbed")
-	
-	axislegend(ax)
-	fig
-end
-
-# ╔═╡ 434107bf-be8e-4751-a568-44b0398e163a
-md"---
-Using the good stuff
-"
-
-# ╔═╡ c33edca1-2c77-4c7f-81a8-97a5f3216e02
-let
-	a = 1.5 # you can vary this value
-	p = 0.09
-	
-	# Define the Lotka-Volterra model for 3 species
-	function lotka_volterra!(du, u, p, t)
-	    x1, x2, x3 = u
-	    A = p
-	    du[1] = x1 * (A[1,1] * (1 - x1) + A[1,2] * (1 - x2) + A[1,3] * (1 - x3))
-	    du[2] = x2 * (A[2,1] * (1 - x1) + A[2,2] * (1 - x2) + A[2,3] * (1 - x3))
-	    du[3] = x3 * (A[3,1] * (1 - x1) + A[3,2] * (1 - x2) + A[3,3] * (1 - x3))
-	end
-	
-	# Parameter of the model (interaction matrix)
-	# a = 1.5
-	A = [0.5 0.5 0.1; -0.5 -0.1 0.1; a 0.1 0.1] 
-	
-	u0 = [0.5, 0.5, 0.5] # Initial conditions for x1, x2, x3
-	tspan = (0.0, 100.0)
-	prob = ODEProblem(lotka_volterra!, u0, tspan, A)
-	sol = solve(prob, Tsit5(), reltol = 1e-8, abstol = 1e-8)
-	
-	# Plot
-	fig = Figure()
-	ax = Axis(fig[1, 1], title = "3-Species Lotka-Volterra Model", 
-			  xlabel = "Time", ylabel = "Population")
-	
-	lines!(ax, sol.t, abs.(sol[1,:]), color = :red, label = "x1")
-	lines!(ax, sol.t, abs.(sol[2,:]), color = :green, label = "x2")
-	lines!(ax, sol.t, abs.(sol[3,:]), color = :blue, label = "x3")
-	
-	fig
-end
-
-# ╔═╡ 1a632ab5-e4b6-4c6d-909f-45967851c0c3
-md"## Helpers"
-
-# ╔═╡ 5b3b415e-ac46-45c2-9a94-37b104fccd17
-function plot_nullclines(ax, k1, α1, k2, α2)
-		x1_range = 0:0.01:k1
-		x2_nullcline = (k1 .- x1_range) ./ α2
-		lines!(ax, x1_range, x2_nullcline, color=:red)
-	
-		x2_range = 0:0.01:k2
-		x1_nullcline = (k2 .- x2_range) ./ α1
-		lines!(ax, x1_nullcline, x2_range, color=:blue)
-end
-
-# ╔═╡ 271e32f9-d56c-4ebf-9dbc-8d926615b6c7
-function plot_fixed_points(ax, k1, α1, k2, α2)
-		if k1 > k2/α1 && k2 > k1/α2 || k1 < k2/α1 && k2 < k1/α2 
-			x2_star = (k2 - α1 * k1) / (1 - α1 * α2)
-			x1_star = k1 - α2 * x2_star
+	# PART 1 - Rate of change
+	for r in 0.2:0.02:0.55
+		a = 0.01
+		f(X) = r * X^3 - X^2 + r * X - a
+		f_prime(X) = 3 * r * X^2 - 2 * X + r
+		roots = find_zeros(f, -10, 10)
+		stability = [f_prime(x) > 0 ? "stable" : "unstable" for x in roots]
+		vlines!(ax, r, color=:grey)
 			
-			# non-zero fixed point
-			scatter!(ax, [x1_star], [x2_star],  marker=:star4, color = :white, 
-					strokecolor = :red, strokewidth = 1, markersize=20)
-			
+		# Plot stable points in green, unstable in red
+		for (root, stab) in zip(roots, stability)
+			    if stab == "stable"
+			        scatter!(ax, [r], [root], color = :black, strokewidth=1, 
+							 strokecolor=:white, markersize = 10)
+			    else
+			        scatter!(ax, [r], [root], color = :white, strokewidth=1, 
+							 strokecolor=:black, markersize = 10)
+			    end
 		end
-		
-		# fixed points
-		scatter!(ax, [0, k1, k2/α1,0], [k2, 0, 0, k1/α2],  color = :white, 
-				 strokecolor = :black, strokewidth = 1, markersize=15)
-			
+	end
+	fig
 end
 
-# ╔═╡ 8939a047-a3ad-4ae2-8203-a5b832a2665e
-let
+# ╔═╡ bfefee0d-6d54-414a-baab-05e5f2edf353
+md"The interpretation is as follows:
+- for large values of r, there is only one equilibrium point, with X at a small values
+- at critical point (around $r=0.23$), there is _saddle-node bifurcation_. As you increase X, you get a unstable state that can either go back to X with a small values or can bifurcate to a high value.
+- With the bifurcation, we get _alternative stable states_.
+
+The way that [Scheffer et al. (2001)](https://www.nature.com/articles/35098000) visualize that is as a shift from one basin of attraction (low $r$, you get a much higher equilibrium point; see previous figure) Here are a few chosen solutions at various $r$"
+
+# ╔═╡ 784867ee-33ac-4381-8259-cf6b421eba08
+let 
+	fig = Figure(size=(800,300))
 	
-	struct LK{T}
-    	r1::T  
-    	k1::T  
-    	α12::T  
-    	r2::T
-    	k2::T
-    	α21::T
+	function Operon!(du, u, p, t) 
+		a,r = p
+		X = u[1]
+		du[1] = (a + X^2) / (1 + X^2) - r*X
 	end
 
-	h(x, P::LK) = Point2f( # y,x
-		P.r1*x[1] * ((P.k1 - x[1] - P.α21*x[2]) / P.k1),
-		P.r2*x[2] * ((P.k2 - x[2] - P.α12*x[1]) / P.k2)
-	)
-	
-	# Plotting
-	f = Figure(size = (800, 800))
+	u0 = [0.001] 
 
-	# species 1 wins (k2/α12 > k1, k2 > k1/α21)
-	r1, r2, α12, α21, k1, k2 = 0.01, 0.01, 0.9, 1.5, 20., 20.
-	max_k = maximum([k1,k2])+2
-	ax = Axis(f[1, 1], title="Species 1 wins (k1 > k2/α12, k1/α21 > k2)")
-	streamplot!(
-		ax, 
-		x -> h(x, LK(r1,k1,α12,r2,k2,α21)), 
-		0..max_k, 0..max_k, 
-		colormap = :magma, 
-		arrow_size=10
-	)
-	plot_nullclines(ax, k1, α12, k2, α21)
-	plot_fixed_points(ax, k1, α12, k2, α21)
+	# Low values
 	
-	# species 2 wins (k1 > k2/α12 , k1/α21 > k2)
-	r1, r2, α12, α21, k1, k2 = 0.01, 0.01, 1.5, 0.9, 20., 20.
-	max_k = maximum([k1,k2])+2
-	ax = Axis(f[1, 2], title="Species 2 wins (k2/α12 > k1, k2 > k1/α21)", xlabel = "N2")
-	streamplot!(
-		ax, 
-		x -> h(x, LK(r1,k1,α12,r2,k2,α21)), 
-		0..max_k, 0..max_k, 
-		colormap = :magma, 
-		arrow_size=10
-	)
-	plot_nullclines(ax, k1, α12, k2, α21)
-	plot_fixed_points(ax, k1, α12, k2, α21)
+	ax = Axis(fig[1, 1], ylabel = "Population")
 	
-	# coexistence regime (k2/α12 > k1, k1/α21 > k2)
-	r1, r2, α12, α21, k1, k2 = 0.01, 0.01, 0.8, 0.8, 20., 20.
-	max_k = maximum([k1,k2])+5
-	ax = Axis(f[2,1], title="Coexistence")
-	streamplot!(
-		ax, 
-		x -> h(x, LK(r1,k1,α12,r2,k2,α21)), 
-		0..max_k, 0..max_k, 
-		colormap = :magma, 
-		arrow_size=10
-	)
-	plot_nullclines(ax, k1, α12, k2, α21)
-	plot_fixed_points(ax, k1, α12, k2, α21)
-
-	# Axis(f[2,2], title="Mystery plot")
-	ax = Axis(f[2,2], title="Mutual exclusion")
-	streamplot!(
-		ax, 
-		x -> h(x, LK(r1,k1,α12,r2,k2,α21)), 
-		0..max_k, 0..max_k, 
-		colormap = :magma, 
-		arrow_size=10
-	)
-	plot_nullclines(ax, k1, α12, k2, α21)
-	plot_fixed_points(ax, k1, α12, k2, α21)
-
-	current_figure()
+	tspan = (0.0, 150.0)
+	for r in 0.17:0.02:0.2
+		a = 0.01
+		prob = ODEProblem(Operon!, u0, tspan, [a,r])
+		sol = solve(prob)
+		lines!(ax, sol.t, abs.(sol[1,:]), label="r=$(r)")
+	end
+	axislegend(position=(0,1))
+	
+	ax = Axis(fig[1, 2], xlabel = "Time")
+	
+	tspan = (0.0, 50.0)
+	for r in 0.27:0.02:0.33
+		a = 0.01
+		prob = ODEProblem(Operon!, u0, tspan, [a,r])
+		sol = solve(prob)
+		lines!(ax, sol.t, abs.(sol[1,:]), label="r=$(r)")
+	end
+	axislegend(position=(1,0))
+	
+	ax = Axis(fig[1, 3])
+	
+	tspan = (0.0, 20.0)
+	for r in 0.51:0.02:0.55
+		a = 0.01
+		prob = ODEProblem(Operon!, u0, tspan, [a,r])
+		sol = solve(prob)
+		lines!(ax, sol.t, abs.(sol[1,:]), label="r=$(r)")
+	end
+	axislegend(position=(1,0))
+	fig
 end
 
-# ╔═╡ 1eb25315-7f72-4888-ab9b-58c77ac254df
-md"### Prey-pred with grazing
+# ╔═╡ 911ce79f-bbc9-4210-8e65-f5c1e6802c58
+let
+	F(x, p) = @. p[1] * x^3 - x^2 + p[1] * x - 0.01 
+	prob = BifurcationProblem(F,                                                            [2.5], # initial condition x0                                             
+		   [0.35],  # set of parameters                                              
+		   1;
+		   record_from_solution = (x,p; k...) -> x[1])  
+	opts = ContinuationPar(p_min = 0.01, p_max = 1.)
+	br = continuation(prob, PALC(),  opts)
+	BifurcationKit.plot(br)
+end
 
-See Thresholds and breakpoints in ecosystems with a multiplicity of stable states ([May 1976](https://www.nature.com/articles/269471a0))
+# ╔═╡ 09a6c2d6-ac7d-43b5-863f-84db7059eeb2
+md"Could we tell just from simulations what is happening?
 
-- V: biomass
-- H: Population of herbivores, at constant density H
-- G(V): growth rate
-- Hc(V): per capita consumption
+## Model 2: The Spruce Budworm
 
-See also Garfinkel p.201
-- Prey-Pred but with Holling Type II response controlling how prey grows in the absence of predators.
-- maximum (satiation) consumption rate per animal ($C_{max}$)
+We have
+
+$$X' = rX\Big(1-\frac{X}{k}\Big) - \Big(\frac{X^2}{1+X^2}\Big)$$
 "
 
-# ╔═╡ 873f7d5c-07f6-4c10-81a3-21e0b23da434
-# max_consumption_rate = @bind ω Slider(0.01:0.01:1, default=0.3, show_value=true)
+# ╔═╡ ecdf32d0-2299-4b64-96e7-3394e5d7f171
+md"Assuming $X\neq 0$, we can divide by $X$ and set the two terms equal to each other. We find"
 
-# ╔═╡ 3c7bd9d6-da81-4234-9e05-2bec883141cf
- 	# half_saturation_density = @bind d Slider(0.1:0.1:5.0, default=1.0, show_value=true)
+# ╔═╡ e68eabd7-f21e-4290-924a-9fe5f80a6919
+growth=@bind rv Slider(0.01:0.01:1, default=0.45, show_value=true)
 
-# ╔═╡ 2bdf51c6-af3a-4fea-bb36-5cda663cfa16
+# ╔═╡ 288034cd-907d-4d40-8c4b-8b22b5176056
+carrying_capacity=@bind kv Slider(1:30, default=20, show_value=true)
+
+# ╔═╡ d4bc7e01-cc34-4374-bf1e-37562a46e2d4
+md"If we look at the bifurcation diagram and another surprise plot"
+
+# ╔═╡ 166a1fca-a3b2-4b80-a793-8c27e7178b3d
 let 
-	ω=0.3
-	d=1.0
+	fig = Figure(size=(800,300))
+
+	r = @isdefined(rv) ? rv : 0.45
+	k = @isdefined(kv) ? kv : 25
+
+	# PLOT 1 --------------------------------------------
+	
+	ax1 = Axis(fig[1, 1], ylabel = "X (ecosystem state)", xlabel = "r", title="k=$(k)") 
+	# ax1 = Axis(fig[1, 1], xlabel = "X (ecosystem state)", ylabel = "r", title="k=$(k)") 
+	hidespines!(ax1, :t, :r) # only top and right
+	# hidexdecorations!(ax1,  label = false)
+	hideydecorations!(ax1,  label = false)
+	
+	for r in 0.05:0.01:0.8
+		k = k
+		f(x) = r*(1 - x/k) - x/(1+x^2)
+		f_prime(x) = (-r) / k + -1 / (1 + x^2) - 2*x*((-x) / ((1 + x^2)^2))
+		roots = find_zeros(f, -30, 30)
+		stability = [f_prime(x) > 0 ? "stable" : "unstable" for x in roots]
+			
+		# Plot stable points in green, unstable in red
+		for (root, stab) in zip(roots, stability)
+			    if stab == "unstable"
+			        scatter!(ax1, [r], [root], color = :black, markersize = 10)
+			    else
+			        scatter!(ax1, [r], [root], color = :white, strokewidth=1, strokecolor=:black, markersize = 10)
+			    end
+		end
+	end
+	
+	# PLOT 2 --------------------------------------------
+	
+	ax2 = Axis(fig[1, 2], xlabel = "k", ylabel="r") 
+	
+	hidespines!(ax2, :t, :r) # only top and right
+	
+	out = []
+	for x=1:0.01:40
+		push!(out, (
+			2*x^3 / (1 + x^2)^2,  # r(x)
+			2*x^3 / (x^2 -1) # k(x)
+		)) 
+	end
+	
+	rvals = [x[1] for x in out]
+	kvals = [x[2] for x in out]
+	lines!(ax2, kvals, rvals, color=:black)
+
+	text!(ax2, [20], [0.7], text="outbreak only")
+	text!(ax2, [5], [0.10], text="refugee only")
+	text!(ax2, [15], [0.40], text="bistable")
+	scatter!(ax2, [k], [r], color=:blue, marker=:cross)
+	text!(ax2, [k], [r], text="You're here", fontsize=8)
+	
+	xlims!(0,40)
+	ylims!(0,0.8)
+	
+	# linkyaxes!(ax1,ax2)
+	
+	fig
+end
+
+# ╔═╡ 88713b49-2017-4d9e-b6cc-7fe1ffc0a08c
+md"On the right, you have a bifurcation diagram showing the type of equilibria possible (see Strogatz 2024 p.86 for details). Top right is the outbreak only, while bottom left is refugee only. Inbetween the curves, this is bistable. You can explore that with the plot on the left, by playing with $k$ parameter. At $k=12$, you can see the splitting occuring with a saddle-node bifurcation."
+
+# ╔═╡ 0cebc752-2f3a-4ec6-a0e0-2363bfc914a4
+md"## Model 3: Pitchfork bifurcation"
+
+# ╔═╡ 403c4c2c-9a9d-41f7-8c14-10b2cc0cae3d
+let 
 	fig = Figure(size=(800,400))
-
-	# r1, r2, k, d, j, ω = 1., 0.1, 7., 1., 1., 0.3
-	r1, r2, k, j = 1., 0.1, 7., 1.
-
-	# ------------ Part 1 - Phase space -----------------------
-
-	struct Grazing{T}
-		r1::T
-		r2::T
-	    k::T
-		d::T
-		j::T
-		ω::T
-	end
-	
-	h(x, P::Grazing) = Point2f( # x,y
-	   	 	P.r1*x[1]*(1-x[1]/P.k) - (P.ω*x[1])/(P.d+x[1])*x[2],
-			P.r2*x[2]*(1 - (P.j*x[2])/x[1])
-	)
-	
-	ax = Axis(fig[1, 1], 
-	    xlabel = "N", 
-	    ylabel = "P", 
-	    title = "Phase space"
-	)
-	
-	streamplot!(ax, 
-		x -> h(x, Grazing(r1, r2, k, d, j, ω)), 
-		0..8, 0..8, 
-		colormap = :magma
-	)
-	
-	# ----------------- PART 2  - Timeseries -------------------
-	
-	h = 0.01 
-	Tmax = 100.0  
-	T = 0:h:Tmax
-	
-	N, P = 2.0, 1.0
-	Nd = [N]
-	Pd = [P]
-
-	# not super efficient
-	for t=2:length(T) 
-		# where cmax -> ω; h -> d from Holling Type II response.
-	    dN = r1*N*(1-N/k) - (ω*N)/(d+N)*P
-	    dP = r2*P*(1 - (j*P)/N)
-	    
-	    N += dN * h 
-	    P += dP * h 
-	    
-	    push!(Nd, N)
-	    push!(Pd, P)
-	end
-	
-	ax = Axis(fig[1,2], xlabel=L"t", ylabel=L"N(t)")
-	lines!(ax, T, Nd, color=:black, label="N")
-	lines!(ax, T, Pd, color=:red, linestyle=:dash, label="P")
+	ax = Axis(fig[1,1], title=L"X'=(1-X) \cdot v\cdot e^{ax} - (1+X) \cdot v\cdot e^{-ax}")
+	hidespines!(ax)
+	v=0.1
+	vlines!(ax, 0, color=:grey, linewidth=0.8)
+	hlines!(ax, 0, color=:black, linewidth=0.8)
+	lines!(ax, -1.1:0.1:1.1, x -> (1-x)*v*exp(2.2*x) - (1+x)*v*exp(-2.2*x), label="a=2.2")
+	lines!(ax, -1.1:0.1:1.1, x -> (1-x)*v*exp(1.5*x) - (1+x)*v*exp(-1.5*x), color=:firebrick, label="a=1.5")
+	lines!(ax, -1.1:0.1:1.1, x -> (1-x)*v*exp(0.8*x) - (1+x)*v*exp(-0.8*x), color=:black, label="a=0.8")
 	axislegend()
 	fig
 end
 
-# ╔═╡ 3b6bc451-565a-4dc0-9fa2-37edbd0801a1
-let
-	fig = Figure()
-	
-	HollingTypeII(N; cmax=1, h=0.4) = (cmax*N) / (N+h)
+# ╔═╡ 8a37f296-b039-461f-9119-83ce1eccea62
 
-	ax = Axis(fig[1, 1], title=L"f(N) = \frac{C_{max}\cdot N}{N + h}\quad (Holling\ Type\ II)", xlabel=L"t", ylabel=L"f(t)")
+
+# ╔═╡ 96f12027-bd27-41bb-a9dd-a24254b3d4f9
+md"---
+
+### Appendix"
+
+# ╔═╡ 76fda2a0-fb4a-44c7-845f-764504b6ba24
+let 
+	# Cheat to find the derivative for model 2
+	@syms x k r
+	z = r*(1 - x/k) - x/(1+x^2)
+	D = Differential(x)
+	println(expand_derivatives(D(z)))
+end
+
+# ╔═╡ 46c84b21-889c-4c46-84e2-8ff2b2218541
+function plot_stability(ax, f, f_prime)
+		roots = find_zeros(f, -30, 30)
+		stability = [f_prime(x) < 0 ? "stable" : "unstable" for x in roots]
+		hlines!(ax, 0, color=:grey)
+		
+		# Plot stable points in green, unstable in red
+		for (root, stab) in zip(roots, stability)
+		    if stab == "stable"
+		        scatter!(ax, [root], [0], color = :black, markersize = 10)
+		    else
+		        scatter!(ax, [root], [0], color = :white, strokewidth=1, strokecolor=:black, markersize = 10)
+		    end
+		end
+	end
+
+# ╔═╡ 0d3c7e7d-89f2-4e56-a0e1-6c3f4e882cff
+let 
+	fig = Figure(size=(800,300))
+
+	# PART 1 - Rate of change
+	a, r = 0.01, 0.4
 	
-	lines!(ax, 0:0.1:10, x -> HollingTypeII(x), color=:blue)
-	lines!(ax, 0:0.1:10, x -> HollingTypeII(x, h=0.9), color=:green)
-	lines!(ax, 0:0.1:10, x -> HollingTypeII(x, h=0.1), color=:red)
+	ax = Axis(fig[1,1], xlabel="X", ylabel="X'", title="Lac Operon System Behavior")
+	lines!(ax, 0:0.01:2.1, x -> (a + x^2) / (1 + x^2), 
+		   label=L"N(t+1) = \frac{a+X^2}{1+X^2}", color=:blue) 
+	lines!(ax, 0:0.01:2.1, x ->  r*x, color=:red, label=L"kX") 
+
+	# Define the function representing the cubic equation
+	f(X) = r * X^3 - X^2 + r * X - a
+	f_prime(X) = 3 * r * X^2 - 2 * X + r
+	
+	# scatter!(ax, 0.5, Nstar)
+	axislegend(position=(0,1))
+	
+	ylims!(0, 1)
+
+	ax = Axis(fig[2, 1]) 
+	hidespines!(ax)
+	hidedecorations!(ax)
+	plot_stability(ax, f, f_prime)
+
+	rowsize!(fig.layout, 1, Relative(0.95))
+	
+	
+	# Part 2 - Solving the model
+	
+	function Operon!(du, u, p, t) 
+		a,r = p
+		X = u[1]
+		du[1] = (a + X^2) / (1 + X^2) - r*X
+	end
+
+	u0 = [0.001] 
+	tspan = (0.0, 30.0)
+	prob = ODEProblem(Operon!, u0, tspan, [a,r])
+	sol = solve(prob)
+	
+	ax = Axis(fig[1, 2], title = "Numeric solution", 
+			  xlabel = "Time", ylabel = "Population")
+	
+	lines!(ax, sol.t, abs.(sol[1,:]), color = :red, label = "x1")
+	fig
+end
+
+# ╔═╡ 7a7360c3-6dce-4639-b37b-4f4f9a9d0014
+let 
+	fig = Figure(size=(800,300))
+
+	# PART 1 - Rate of change
+	a, r = 0.01, 0.19
+	
+	ax = Axis(fig[1,1], xlabel="X", ylabel="X'", title="Lac Operon System Behavior")
+	lines!(ax, 0:0.01:6, x -> (a + x^2) / (1 + x^2), 
+		   label=L"N(t+1) = \frac{a+X^2}{1+X^2}", color=:blue) 
+	lines!(ax, 0:0.01:6, x ->  r*x, color=:red, label=L"kX") 
+
+	# Define the function representing the cubic equation
+	f(X) = r * X^3 - X^2 + r * X - a
+	f_prime(X) = 3 * r * X^2 - 2 * X + r
+	
+	ylims!(0, 1)
+
+	ax = Axis(fig[2, 1]) 
+	hidespines!(ax)
+	hidedecorations!(ax)
+	plot_stability(ax, f, f_prime)
+	xlims!(0, 6)
+
+	rowsize!(fig.layout, 1, Relative(0.95))
+	
+	
+	# Part 2 - Solving the model
+	
+	function Operon!(du, u, p, t) 
+		a,r = p
+		X = u[1]
+		du[1] = (a + X^2) / (1 + X^2) - r*X
+	end
+
+	u0 = [0.001] 
+	tspan = (0.0, 200.0)
+	prob = ODEProblem(Operon!, u0, tspan, [a,r])
+	sol = solve(prob)
+	
+	ax = Axis(fig[1, 2], title = "Numeric solution", 
+			  xlabel = "Time", ylabel = "Population")
+	
+	lines!(ax, sol.t, abs.(sol[1,:]), color = :red, label = "x1")
+	fig
+end
+
+# ╔═╡ ca2de1cd-dfe0-4777-8e6a-aee8c987c1e6
+let 
+	fig = Figure(size=(800,300))
+
+	# PART 1 - Rate of change
+	a, r = 0.01, 0.55
+	
+	ax = Axis(fig[1,1], xlabel="X", ylabel="X'", title="Lac Operon System Behavior")
+	lines!(ax, 0:0.01:.5, x -> (a + x^2) / (1 + x^2), 
+		   label=L"N(t+1) = \frac{a+X^2}{1+X^2}", color=:blue) 
+	lines!(ax, 0:0.01:.5, x ->  r*x, color=:red, label=L"kX") 
+
+	# Define the function representing the cubic equation
+	f(X) = r * X^3 - X^2 + r * X - a
+	f_prime(X) = 3 * r * X^2 - 2 * X + r
+	
+	ylims!(0, 0.3)
+
+	ax = Axis(fig[2, 1]) 
+	hidespines!(ax)
+	hidedecorations!(ax)
+	plot_stability(ax, f, f_prime)
+	xlims!(0, .5)
+
+	rowsize!(fig.layout, 1, Relative(0.95))
+	
+	
+	# Part 2 - Solving the model
+	
+	function Operon!(du, u, p, t) 
+		a,r = p
+		X = u[1]
+		du[1] = (a + X^2) / (1 + X^2) - r*X
+	end
+
+	u0 = [0.001] 
+	tspan = (0.0, 20.0)
+	prob = ODEProblem(Operon!, u0, tspan, [a,r])
+	sol = solve(prob)
+	
+	ax = Axis(fig[1, 2], title = "Numeric solution", 
+			  xlabel = "Time", ylabel = "Population")
+	
+	lines!(ax, sol.t, abs.(sol[1,:]), color = :red, label = "x1")
+	fig
+end
+
+# ╔═╡ b32c0f0f-9e92-4cde-9027-68eb1373244e
+let 
+	fig = Figure(size=(800,300))
+
+	# PART 1 - Rate of change
+	r = @isdefined(rv) ? rv : 0.45
+	k = @isdefined(kv) ? kv : 25
+	
+	# r, k = 0.6, 25
+	tmax = k+5
+	
+	ax1 = Axis(fig[1,1], xlabel="X", ylabel="X'", title="Spruce Budworm (r=0.45, k=10)")
+	lines!(ax1, 0:0.01:tmax, x -> r*(1 - x/k), color=:blue, label=L"r(1-\frac{X}{k})") 
+	lines!(ax1, 0:0.01:tmax, x -> x / ( 1+x^2 ), color=:red, label=L"\frac{X}{1 + X^2}") 
+
+	axislegend()
+	ylims!(0,0.52)
+
+	f(x) = r*(1 - x/k) - x/(1+x^2)
+	f_prime(x) = (-r) / k + -1 / (1 + x^2) - 2*x*((-x) / ((1 + x^2)^2))
+	# stability plot (something's not working)
+	
+	ax2 = Axis(fig[2, 1]) 
+	hidespines!(ax2)
+	hidedecorations!(ax2)
+	plot_stability(ax2, f, f_prime)
+	rowsize!(fig.layout, 1, Relative(0.95))
+	
+	linkxaxes!(ax1, ax2)
+	
+	# Part 2 - Solving the model
+	
+	function BudWorm!(du, u, p, t) 
+		r,k = p
+		X = u[1]
+		du[1] = r*X*(1-X/k) - X^2 / (1 + X^2)
+	end
+
+	u0 = [0.001] 
+	tspan = (0.0, 150.0)
+	prob = ODEProblem(BudWorm!, u0, tspan, [r,k])
+	sol = solve(prob)
+	
+	ax = Axis(fig[1, 2], title = "Numeric solution", 
+			  xlabel = "Time", ylabel = "Population")
+	
+	lines!(ax, sol.t, abs.(sol[1,:]), color = :red, label = "x1")
 	fig
 end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+BifurcationKit = "0f109fa4-8a5d-4b75-95aa-f515264e7665"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+Roots = "f2b01f46-fcfa-551c-844a-d8ac1e96c665"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 
 [compat]
+BifurcationKit = "~0.4.2"
 CairoMakie = "~0.12.11"
 DifferentialEquations = "~7.13.0"
 PlutoUI = "~0.7.60"
+Roots = "~2.1.8"
+StaticArrays = "~1.9.7"
 Symbolics = "~6.4.0"
 """
 
@@ -669,7 +514,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.10.5"
 manifest_format = "2.0"
-project_hash = "3cef9e146e2cc6de5e1ed7b3e8db99e90d1209a2"
+project_hash = "e8922012ef2a0fb27dec18038cedb6ee3bbd1e10"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "99a6f5d0ce1c7c6afdb759daa30226f71c54f6b0"
@@ -765,6 +610,18 @@ git-tree-sha1 = "d57bd3762d308bded22c3b82d033bff85f6195c6"
 uuid = "ec485272-7323-5ecc-a04f-4719b315124d"
 version = "0.4.0"
 
+[[deps.Arpack]]
+deps = ["Arpack_jll", "Libdl", "LinearAlgebra", "Logging"]
+git-tree-sha1 = "91ca22c4b8437da89b030f08d71db55a379ce958"
+uuid = "7d9fca2a-8960-54d3-9f78-7d1dccf2cb97"
+version = "0.5.3"
+
+[[deps.Arpack_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "OpenBLAS_jll", "Pkg"]
+git-tree-sha1 = "5ba6c757e8feccf03a1554dfaf3e26b3cfc7fd5e"
+uuid = "68821587-b530-5797-8361-c406ea357684"
+version = "3.5.1+1"
+
 [[deps.ArrayInterface]]
 deps = ["Adapt", "LinearAlgebra"]
 git-tree-sha1 = "3640d077b6dafd64ceb8fd5c1ec76f7ca53bcf76"
@@ -839,6 +696,22 @@ weakdeps = ["SparseArrays"]
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 
+[[deps.BifurcationKit]]
+deps = ["Accessors", "ArnoldiMethod", "Arpack", "BlockArrays", "DataStructures", "Dates", "DocStringExtensions", "FastGaussQuadrature", "ForwardDiff", "IterativeSolvers", "KrylovKit", "LinearAlgebra", "LinearMaps", "Parameters", "PreallocationTools", "Printf", "RecipesBase", "RecursiveArrayTools", "Reexport", "SciMLBase", "Setfield", "SparseArrays", "StructArrays"]
+git-tree-sha1 = "239db270efab60c45a47bfe86e447ccee6d82838"
+uuid = "0f109fa4-8a5d-4b75-95aa-f515264e7665"
+version = "0.4.2"
+
+    [deps.BifurcationKit.extensions]
+    GLMakieExt = "GLMakie"
+    JLD2Ext = "JLD2"
+    PlotsExt = "Plots"
+
+    [deps.BifurcationKit.weakdeps]
+    GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+    JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+    Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+
 [[deps.Bijections]]
 git-tree-sha1 = "d8b0439d2be438a5f2cd68ec158fe08a7b2595b7"
 uuid = "e2ed5e7c-b2de-5872-ae92-c73ca462fb04"
@@ -849,6 +722,16 @@ deps = ["Static"]
 git-tree-sha1 = "f21cfd4950cb9f0587d5067e69405ad2acd27b87"
 uuid = "62783981-4cbd-42fc-bca8-16325de8dc4b"
 version = "0.1.6"
+
+[[deps.BlockArrays]]
+deps = ["ArrayLayouts", "FillArrays", "LinearAlgebra"]
+git-tree-sha1 = "d434647f798823bcae510aee0bc0401927f64391"
+uuid = "8e7c35d0-a365-5155-bbbb-fb81a777f24e"
+version = "1.1.1"
+weakdeps = ["BandedMatrices"]
+
+    [deps.BlockArrays.extensions]
+    BlockArraysBandedMatricesExt = "BandedMatrices"
 
 [[deps.BoundaryValueDiffEq]]
 deps = ["ADTypes", "Adapt", "ArrayInterface", "BandedMatrices", "ConcreteStructs", "DiffEqBase", "FastAlmostBandedMatrices", "FastClosures", "ForwardDiff", "LinearAlgebra", "LinearSolve", "Logging", "NonlinearSolve", "OrdinaryDiffEq", "PreallocationTools", "PrecompileTools", "Preferences", "RecursiveArrayTools", "Reexport", "SciMLBase", "Setfield", "SparseArrays", "SparseDiffTools"]
@@ -1319,6 +1202,12 @@ git-tree-sha1 = "acebe244d53ee1b461970f8910c235b259e772ef"
 uuid = "9aa1b823-49e4-5ca5-8b0f-3971ec8bab6a"
 version = "0.3.2"
 
+[[deps.FastGaussQuadrature]]
+deps = ["LinearAlgebra", "SpecialFunctions", "StaticArrays"]
+git-tree-sha1 = "fd923962364b645f3719855c88f7074413a6ad92"
+uuid = "442a2c76-b920-505d-bb47-c5924d526838"
+version = "1.0.2"
+
 [[deps.FastLapackInterface]]
 deps = ["LinearAlgebra"]
 git-tree-sha1 = "cbf5edddb61a43669710cbc2241bc08b36d9e660"
@@ -1684,6 +1573,12 @@ git-tree-sha1 = "42d5f897009e7ff2cf88db414a389e5ed1bdd023"
 uuid = "c8e1da08-722c-5040-9ed9-7db0dc04731e"
 version = "1.10.0"
 
+[[deps.IterativeSolvers]]
+deps = ["LinearAlgebra", "Printf", "Random", "RecipesBase", "SparseArrays"]
+git-tree-sha1 = "59545b0a2b27208b0650df0a46b8e3019f85055b"
+uuid = "42fd0dbc-a981-5370-80f2-aaf504508153"
+version = "0.9.4"
+
 [[deps.IteratorInterfaceExtensions]]
 git-tree-sha1 = "a3f24677c21f5bbe9d2a714f95dcd58337fb2856"
 uuid = "82899510-4779-5014-852e-03e436cf321d"
@@ -1737,6 +1632,16 @@ deps = ["LinearAlgebra", "Printf", "SparseArrays"]
 git-tree-sha1 = "267dad6b4b7b5d529c76d40ff48d33f7e94cb834"
 uuid = "ba0b0d4f-ebba-5204-a429-3ac8c609bfb7"
 version = "0.9.6"
+
+[[deps.KrylovKit]]
+deps = ["GPUArraysCore", "LinearAlgebra", "PackageExtensionCompat", "Printf", "VectorInterface"]
+git-tree-sha1 = "3c2a016489c38f35160a246c91a3f3353c47bb68"
+uuid = "0b1a1467-8014-51b9-945f-bf0ae24f4b77"
+version = "0.8.1"
+weakdeps = ["ChainRulesCore"]
+
+    [deps.KrylovKit.extensions]
+    KrylovKitChainRulesCoreExt = "ChainRulesCore"
 
 [[deps.LAME_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1893,6 +1798,18 @@ version = "7.3.0"
 [[deps.LinearAlgebra]]
 deps = ["Libdl", "OpenBLAS_jll", "libblastrampoline_jll"]
 uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+
+[[deps.LinearMaps]]
+deps = ["LinearAlgebra"]
+git-tree-sha1 = "ee79c3208e55786de58f8dcccca098ced79f743f"
+uuid = "7a12625a-238d-50fd-b39a-03d52299707e"
+version = "3.11.3"
+weakdeps = ["ChainRulesCore", "SparseArrays", "Statistics"]
+
+    [deps.LinearMaps.extensions]
+    LinearMapsChainRulesCoreExt = "ChainRulesCore"
+    LinearMapsSparseArraysExt = "SparseArrays"
+    LinearMapsStatisticsExt = "Statistics"
 
 [[deps.LinearSolve]]
 deps = ["ArrayInterface", "ChainRulesCore", "ConcreteStructs", "DocStringExtensions", "EnumX", "FastLapackInterface", "GPUArraysCore", "InteractiveUtils", "KLU", "Krylov", "LazyArrays", "Libdl", "LinearAlgebra", "MKL_jll", "Markdown", "PrecompileTools", "Preferences", "RecursiveFactorization", "Reexport", "SciMLBase", "SciMLOperators", "Setfield", "SparseArrays", "Sparspak", "StaticArraysCore", "UnPack"]
@@ -2685,6 +2602,24 @@ git-tree-sha1 = "58cdd8fb2201a6267e1db87ff148dd6c1dbd8ad8"
 uuid = "f50d1b31-88e8-58de-be2c-1cc44531875f"
 version = "0.5.1+0"
 
+[[deps.Roots]]
+deps = ["Accessors", "ChainRulesCore", "CommonSolve", "Printf"]
+git-tree-sha1 = "48a7925c1d971b03bb81183b99d82c1dc7a3562f"
+uuid = "f2b01f46-fcfa-551c-844a-d8ac1e96c665"
+version = "2.1.8"
+
+    [deps.Roots.extensions]
+    RootsForwardDiffExt = "ForwardDiff"
+    RootsIntervalRootFindingExt = "IntervalRootFinding"
+    RootsSymPyExt = "SymPy"
+    RootsSymPyPythonCallExt = "SymPyPythonCall"
+
+    [deps.Roots.weakdeps]
+    ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+    IntervalRootFinding = "d2bf35a9-74e0-55ec-b149-d360ff49b807"
+    SymPy = "24249f21-da20-56a4-8eb1-6a02cf4ae2e6"
+    SymPyPythonCall = "bc8888f7-b21e-4b7c-a06a-5d9c9496438c"
+
 [[deps.RoundingEmulator]]
 git-tree-sha1 = "40b9edad2e5287e05bd413a38f61a8ff55b9557b"
 uuid = "5eaf0fd0-dfba-4ccb-bf02-d820a40db705"
@@ -3176,6 +3111,12 @@ git-tree-sha1 = "25008b734a03736c41e2a7dc314ecb95bd6bbdb0"
 uuid = "a7c27f48-0311-42f6-a7f8-2c11e75eb415"
 version = "0.1.6"
 
+[[deps.VectorInterface]]
+deps = ["LinearAlgebra"]
+git-tree-sha1 = "7aff7d62bffad9bba9928eb6ab55226b32a351eb"
+uuid = "409d34a3-91d5-4945-b6ec-7529ddf182d8"
+version = "0.4.6"
+
 [[deps.VectorizationBase]]
 deps = ["ArrayInterface", "CPUSummary", "HostCPUFeatures", "IfElse", "LayoutPointers", "Libdl", "LinearAlgebra", "SIMDTypes", "Static", "StaticArrayInterface"]
 git-tree-sha1 = "e7f5b81c65eb858bed630fe006837b935518aca5"
@@ -3336,37 +3277,32 @@ version = "3.6.0+0"
 """
 
 # ╔═╡ Cell order:
-# ╠═1c1d9c09-28e8-4adf-8099-ea489ddc7f87
-# ╠═3f35d529-931e-4895-82d1-01d611b49ed9
-# ╠═ff1e39f5-c648-481a-9194-7f9a4be71a88
-# ╟─680f4d18-b855-4535-83a7-3b859a92f0f1
-# ╠═45867cdf-9cff-4f37-9f8c-87eb6bf133b9
-# ╠═21d35ee9-9f6a-44be-bf6a-6459175a83ae
-# ╟─31f94c86-ad6c-446f-84eb-a17c865d4463
-# ╠═a4e84256-abd8-495c-8445-a75235b2669c
-# ╟─1cfab4fa-2fb0-49a4-92f6-a1a7eb56e8d2
-# ╟─5e26b052-7529-4841-a55c-79943c102bd6
-# ╟─897e030a-9efe-4ecd-8727-95bb4c5350ad
-# ╠═a6097bcf-2a35-4d22-a622-ed264e5df5f4
-# ╟─966176bf-0d82-4829-b48e-3b9d78414f83
-# ╠═8939a047-a3ad-4ae2-8203-a5b832a2665e
-# ╟─27210822-ca11-4715-87fe-a368faccc885
-# ╟─887c30fb-410d-4ee2-a111-b652b248dd27
-# ╠═bc81df83-de41-421a-96af-bb6535f4e83f
-# ╟─5165359e-bc77-454f-ba2e-4a8890b84751
-# ╟─9302f6f8-2270-4e4b-a58e-421643884ca9
-# ╠═06dc3062-9798-400d-be31-2c384298dc51
-# ╠═64b0b639-06e0-41f6-b793-0b8e606493de
-# ╟─798b695d-45c0-4ced-96bd-b3b24b1bb176
-# ╟─434107bf-be8e-4751-a568-44b0398e163a
-# ╠═c33edca1-2c77-4c7f-81a8-97a5f3216e02
-# ╟─1a632ab5-e4b6-4c6d-909f-45967851c0c3
-# ╠═5b3b415e-ac46-45c2-9a94-37b104fccd17
-# ╠═271e32f9-d56c-4ebf-9dbc-8d926615b6c7
-# ╟─1eb25315-7f72-4888-ab9b-58c77ac254df
-# ╠═873f7d5c-07f6-4c10-81a3-21e0b23da434
-# ╠═3c7bd9d6-da81-4234-9e05-2bec883141cf
-# ╠═2bdf51c6-af3a-4fea-bb36-5cda663cfa16
-# ╠═3b6bc451-565a-4dc0-9fa2-37edbd0801a1
+# ╠═e294cc06-8612-4b0d-a6a8-71fd2c9b9b0a
+# ╟─77f53eee-7f3e-11ef-1c4f-19f70a6defd8
+# ╟─e9df3bcd-0b22-4310-8091-9c2c06d74fb8
+# ╟─0d3c7e7d-89f2-4e56-a0e1-6c3f4e882cff
+# ╟─c44f28c6-34db-4e9a-834e-e1d99761996b
+# ╟─7a7360c3-6dce-4639-b37b-4f4f9a9d0014
+# ╟─1a31c7bf-f6b3-4dfb-b800-56e7e53daf19
+# ╟─ca2de1cd-dfe0-4777-8e6a-aee8c987c1e6
+# ╟─852053ab-357f-4e15-97bf-7b27c01c8929
+# ╠═1d57537e-8ff8-45c8-b32d-439392a09f16
+# ╠═bfefee0d-6d54-414a-baab-05e5f2edf353
+# ╟─784867ee-33ac-4381-8259-cf6b421eba08
+# ╠═911ce79f-bbc9-4210-8e65-f5c1e6802c58
+# ╠═09a6c2d6-ac7d-43b5-863f-84db7059eeb2
+# ╟─ecdf32d0-2299-4b64-96e7-3394e5d7f171
+# ╟─e68eabd7-f21e-4290-924a-9fe5f80a6919
+# ╟─288034cd-907d-4d40-8c4b-8b22b5176056
+# ╟─b32c0f0f-9e92-4cde-9027-68eb1373244e
+# ╟─d4bc7e01-cc34-4374-bf1e-37562a46e2d4
+# ╟─166a1fca-a3b2-4b80-a793-8c27e7178b3d
+# ╟─88713b49-2017-4d9e-b6cc-7fe1ffc0a08c
+# ╟─0cebc752-2f3a-4ec6-a0e0-2363bfc914a4
+# ╟─403c4c2c-9a9d-41f7-8c14-10b2cc0cae3d
+# ╠═8a37f296-b039-461f-9119-83ce1eccea62
+# ╟─96f12027-bd27-41bb-a9dd-a24254b3d4f9
+# ╠═76fda2a0-fb4a-44c7-845f-764504b6ba24
+# ╠═46c84b21-889c-4c46-84e2-8ff2b2218541
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
