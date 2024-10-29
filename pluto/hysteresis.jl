@@ -374,8 +374,163 @@ $$\begin{align*}
 # ╔═╡ 977abf96-be2a-490d-ada8-538a5b7e18c7
 md"Note that $\tau_g$ ends up is a function of $n,p$ through the cost function:
 
-$$c(n,p) = c_0*e^{-\frac{p}{n}}$$
+$$c(n,p) = c_0*e^{-\frac{3\cdot p}{n}}$$
 "
+
+# ╔═╡ dcece9ff-b037-49f7-b593-6a75706ff980
+md"But other options are
+
+- option 2: $c(n,p) = \frac{1}{(1 + \exp(-k*( p/n - x_0))}$
+"
+
+# ╔═╡ 29f46a40-f59d-4a5e-a3ae-519875c1f360
+@bind α Slider(0.001:0.001:0.1, default=0.01, show_value=true)
+
+# ╔═╡ 321170d5-c1bd-4cc6-9cb0-f6db5e914620
+@bind β Slider(0.001:0.001:0.1, default=0.04, show_value=true)
+
+# ╔═╡ a08b0207-a29c-40b9-bb56-12b9c8e66d59
+let
+	fig = Figure()
+	ax = Axis(fig[1, 1], title="Logistic Function c(X; k, x₀)",
+	          xlabel="#prog/#non-prog", ylabel="c(X; k, x₀)")
+
+	
+	x₀ = 0.25 # smaller x₀ means that the cost is decreasing drastically as soon as we hit 1:many non-prog. So even a few programmers in a small team can really lower the cost. With x₀=0.5, you need to have as many programmers to non-programmers to see an effect..
+	k = 20 # smaller k reflects smoother transition; k=5 the cost is never 1 (certain failure), then it takes a while before the cost get to zero. This _attenuate_ the effect of programmers on the learning of non-programmers.
+	c(x) = 1 / (1 + exp(k*(x - x₀)))
+
+	# In a group m=4
+	println(c(0.9)) # say 9prog/(9prog+1non-prog)
+	println(c(0.75)) # say 3prog/(3prog+1non-prog)
+	println(c(0.5))  #  2prog/(2prog+2non-prog) 
+	println(c(0.25)) # say 1prog/(1prog+3non-prog)
+	println(c(0.1)) # say 1prog/(1prog+9non-prog)
+	
+	lines!(ax, 0:0.01:1, x -> c(x), label="k=$k", linewidth=2)
+	k=40
+	lines!(ax, 0:0.01:1, x -> c(x), label="k=$k", linewidth=2)
+	k=10
+	lines!(ax, 0:0.01:1, x -> c(x), label="k=$k", linewidth=2)
+	k=5
+	lines!(ax, 0:0.01:1, x -> c(x), label="k=$k", linewidth=2)
+	ylims!(0,1)
+	# Add legend
+	axislegend(ax)
+	
+	fig
+end
+
+# ╔═╡ 7202abbe-ab85-4c61-a6dc-2c6f7be330cb
+let
+	fig = Figure()
+	ax = Axis(fig[1, 1], title="Logistic Function c(X; k, x₀)",
+	          xlabel="#prog/#non-prog", ylabel="c(X; k, x₀)")
+
+	
+	x₀ = 0.5                    
+	k = 20
+	c(x) = 1 / (1 + exp(k*(x - x₀)))
+
+	# In a group m=4
+	println(c(0.9)) # say 9prog/(9prog+1non-prog)
+	println(c(0.75)) # say 3prog/(3prog+1non-prog)
+	println(c(0.5))  #  2prog/(2prog+2non-prog) 
+	println(c(0.25)) # say 1prog/(1prog+3non-prog)
+	println(c(0.1)) # say 1prog/(1prog+9non-prog)
+	
+	lines!(ax, 0:0.01:1, x -> c(x), label="k=$k", linewidth=2)
+	k=40
+	lines!(ax, 0:0.01:1, x -> c(x), label="k=$k", linewidth=2)
+	k=5
+	lines!(ax, 0:0.01:1, x -> c(x), label="k=$k", linewidth=2)
+	ylims!(0,1)
+	# Add legend
+	axislegend(ax)
+	
+	fig
+end
+
+# ╔═╡ 4a2e32cd-938b-407d-b7a7-621197686ba2
+let
+	fig = Figure(size=(900,300))
+
+	
+	x₀ = 0.5                    
+	k = 20
+	α, β = 0.01, 0.09
+	
+	ax = Axis(fig[1, 1], title="τ_g(x)",
+	          xlabel="#prog/#non-prog", ylabel="c(X; k, x₀)")
+	
+	c(x) = 1 / (1 + exp(k*(x - x₀)))
+	τ_g(x) = -α + β*(1-c(x))
+	
+	# Plot 1
+	
+
+	lines!(ax, 0:0.01:1, x -> τ_g(x), label="k=$k, α=$α, β=$β", linewidth=2)
+	k=40
+	lines!(ax, 0:0.01:1, x -> τ_g(x), label="k=$k, α=$α, β=$β", linewidth=2)
+	k=5
+	lines!(ax, 0:0.01:1, x -> τ_g(x, ), label="k=$k, α=$α, β=$β", linewidth=2)
+
+	axislegend(ax, position=(1,0))
+	# Plot 2
+	# higher β means higher collective benefit of learning to code
+	
+	α, β = 0.01, 0.05
+	ax = Axis(fig[1, 2], title="τ_g(x)",
+	          xlabel="#prog/#non-prog", ylabel="c(X; k, x₀)")
+	
+	lines!(ax, 0:0.01:1, x -> τ_g(x), label="k=$k, α=$α, β=$β", linewidth=2)
+	k=40
+	lines!(ax, 0:0.01:1, x -> τ_g(x), label="k=$k, α=$α, β=$β", linewidth=2)
+	k=5
+	lines!(ax, 0:0.01:1, x -> τ_g(x, ), label="k=$k, α=$α, β=$β", linewidth=2)
+	
+	
+	# Add legend
+	axislegend(ax, position=(1,0))
+	
+	fig
+end
+
+# ╔═╡ 096c80e2-0de2-4d67-8850-65efb21481c0
+let 
+	fig = Figure(size=(800,300))
+
+	c(p,n;k,x₀) = ( 1/(1 + exp(-k*( p/n - x₀))))
+	τ_g(p,n; α, β) = -α + β*(1 - c(p,n,k=40,x₀=0.25))
+
+	μ, k, νp = 0.1, 40, 0.03 
+	
+	ax = Axis(fig[1,1], xlabel="X", ylabel="X'")
+
+	# INFLOW NON-prog
+	lines!(ax, 0:0.01:40, x -> μ*x*(1 - x/k), 
+		   label=L"N(t+1) = \mu X (1 - \frac{X}{k})", color=:forestgreen) 
+	
+	# DEATH non-prog
+	lines!(ax, 0:0.01:40, x -> x*νp, color=:firebrick, label=L"p \nu_p") 
+
+	# Define the function representing the cubic equation
+	# f(X) = r*X^3 - X^2 + r*X - a
+	# f_prime(X) = 3*r*X^2 - 2*X + r
+	
+	axislegend(position=(0,1))
+	
+	# ylims!(0, 1)
+
+	# ax = Axis(fig[2, 1]) 
+	# hidespines!(ax)
+	# hidedecorations!(ax)
+	# plot_stability(ax, f, f_prime)
+
+	# rowsize!(fig.layout, 1, Relative(0.95))
+
+	fig
+end
 
 # ╔═╡ c78d2e94-eb30-45ac-82b5-e7eb3b994817
 md"In any case, what is our birth and death process here? 
@@ -401,7 +556,7 @@ end
 # ╔═╡ 46c84b21-889c-4c46-84e2-8ff2b2218541
 function plot_stability(ax, f, f_prime)
 		roots = find_zeros(f, -30, 30)
-		stability = [f_prime(x) > 0 ? "stable" : "unstable" for x in roots]
+		stability = [f_prime(x) < 0 ? "stable" : "unstable" for x in roots]
 		hlines!(ax, 0, color=:grey)
 		
 		# Plot stable points in green, unstable in red
@@ -567,7 +722,7 @@ let
 	# r, k = 0.6, 25
 	tmax = k+5
 	
-	ax1 = Axis(fig[1,1], xlabel="X", ylabel="X'", title="Spruce Budworm (r=0.45, k=10)")
+	ax1 = Axis(fig[1,1], xlabel="X", ylabel="X'", title="Spruce Budworm (r=$r, k=$(k))")
 	lines!(ax1, 0:0.01:tmax, x -> r*(1 - x/k), color=:blue, label=L"r(1-\frac{X}{k})") 
 	lines!(ax1, 0:0.01:tmax, x -> x / ( 1+x^2 ), color=:red, label=L"\frac{X}{1 + X^2}") 
 	text!(ax1, [k], [0], text="k") 
@@ -3790,20 +3945,27 @@ version = "1.4.1+1"
 # ╟─ecdf32d0-2299-4b64-96e7-3394e5d7f171
 # ╟─e68eabd7-f21e-4290-924a-9fe5f80a6919
 # ╟─288034cd-907d-4d40-8c4b-8b22b5176056
-# ╟─b32c0f0f-9e92-4cde-9027-68eb1373244e
+# ╠═b32c0f0f-9e92-4cde-9027-68eb1373244e
 # ╟─d4bc7e01-cc34-4374-bf1e-37562a46e2d4
 # ╟─166a1fca-a3b2-4b80-a793-8c27e7178b3d
 # ╟─88713b49-2017-4d9e-b6cc-7fe1ffc0a08c
 # ╟─0cebc752-2f3a-4ec6-a0e0-2363bfc914a4
 # ╟─403c4c2c-9a9d-41f7-8c14-10b2cc0cae3d
-# ╟─1e4a4dfb-45a8-4470-8f86-1504ad389c0a
+# ╠═1e4a4dfb-45a8-4470-8f86-1504ad389c0a
 # ╠═b0ab09dc-f01f-4abe-955f-eec6d007450c
 # ╠═781353f7-557d-4be7-9ef3-0cedde39b045
 # ╟─8a37f296-b039-461f-9119-83ce1eccea62
 # ╟─637d782e-2014-4ca2-a60e-6ad0eb9fb2b6
 # ╟─da14ff9e-c138-4e3e-840e-2ae5ece7ae64
 # ╟─977abf96-be2a-490d-ada8-538a5b7e18c7
-# ╠═c78d2e94-eb30-45ac-82b5-e7eb3b994817
+# ╠═dcece9ff-b037-49f7-b593-6a75706ff980
+# ╟─29f46a40-f59d-4a5e-a3ae-519875c1f360
+# ╟─321170d5-c1bd-4cc6-9cb0-f6db5e914620
+# ╠═a08b0207-a29c-40b9-bb56-12b9c8e66d59
+# ╠═7202abbe-ab85-4c61-a6dc-2c6f7be330cb
+# ╠═4a2e32cd-938b-407d-b7a7-621197686ba2
+# ╠═096c80e2-0de2-4d67-8850-65efb21481c0
+# ╟─c78d2e94-eb30-45ac-82b5-e7eb3b994817
 # ╟─96f12027-bd27-41bb-a9dd-a24254b3d4f9
 # ╠═76fda2a0-fb4a-44c7-845f-764504b6ba24
 # ╠═46c84b21-889c-4c46-84e2-8ff2b2218541
