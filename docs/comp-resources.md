@@ -7,6 +7,8 @@
 ## Julia
 
 - [Introduction to Computational Thinking](https://computationalthinking.mit.edu/Fall24/): greatest Julia introduction ever.
+- [Agents.jl](https://juliadynamics.github.io/Agents.jl/stable/)
+- [Agents.jl's Example Zoo](https://juliadynamics.github.io/AgentsExampleZoo.jl/dev/)
 
 ## Python
 

@@ -1,5 +1,5 @@
 
-# Networks
+# Models on Networks
 
 <div class="reading-box">
   <h3>📚 Week 10 readings</h3>

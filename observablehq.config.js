@@ -33,18 +33,21 @@ export default {
       ]
     },
     {
-      name: "Dynamics & Structure",
+      name: "Dynamics, Structure & Statistics",
       path: "Dynamics-and-Structure",
       pages: [
-        { name: "Week 13: ABMs in archeology", path: "/M4-Dynamics-and-Structure/W13-crabtree-abms" },
-        { name: "Week 14: Evolutionary game theory", path: "/M4-Dynamics-and-Structure/W14-evo-game-theory" },
+        { name: "Agent-based modeling", path: "/M4-Dynamics-and-Structure/abms" },
+        { name: "Evolutionary game theory", path: "/M4-Dynamics-and-Structure/evo-game-theory" },
+        { name: "ABMs ❤️ Evo. game theory", path: "/M4-Dynamics-and-Structure/abms-meet-egt" },
+        { name: "Model Selection", path: "/M4-Dynamics-and-Structure/model-selection" },
+        { name: "Generalized linear madness", path: "/M4-Dynamics-and-Structure/glms" },
       ]
     },
     {
       name: "Model Theory (redux)",
       path: "Model-theory-redux",
       pages: [
-
+        
       ]
     },
     { name: "Syllabus", path: "/syllabus" },
